@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Resources>
+    <Strings>
+        <Hello>Hi!</Hello>
+        <Bye>Byebye!</Bye>
+    </Strings>
+</Resources>
