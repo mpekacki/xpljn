@@ -6,7 +6,7 @@ extern crate sxd_xpath;
 use jsonpath::Selector;
 use regex::Regex;
 use serde_json::Value;
-use std::{env, fs};
+use std::{env, fs, path::PathBuf};
 use sxd_document::parser;
 use sxd_xpath::evaluate_xpath;
 
@@ -61,20 +61,37 @@ impl ExpressionReplacer for JsonReplacer {
 }
 
 fn main() {
-    let current_dir = env::current_dir().unwrap();
-    println!("Files in current dir ({:?}):", current_dir);
-    let extension = ".template";
+    let args: Vec<String> = env::args().collect();
+    let config = Config::new(&args).unwrap();
 
-    for entry in fs::read_dir(current_dir).unwrap() {
+    run(config);
+}
+
+struct Config {
+    extension: String,
+    dir: PathBuf
+}
+
+impl Config {
+    fn new(args: &[String]) -> Result<Config, &str> {
+        let dir = env::current_dir().expect("Problem with getting current dir");
+        let extension = String::from(".template");
+
+        Ok(Config { extension, dir })
+    }
+}
+
+fn run(config: Config) {
+    for entry in fs::read_dir(config.dir).unwrap() {
         let entry = entry.unwrap();
         let mut file_name = entry.file_name().to_string_lossy().to_string();
-        if file_name.ends_with(extension) {
+        if file_name.ends_with(&config.extension) {
             let mut contents = fs::read_to_string(entry.file_name()).unwrap().clone();
             println!("Contents: {:?}", contents);
             contents = XmlReplacer::replace(&contents);
             contents = JsonReplacer::replace(&contents);
             println!("Replaced: {:?}", contents);
-            file_name.truncate(file_name.len() - extension.len());
+            file_name.truncate(file_name.len() - config.extension.len());
             println!("New name: {:?}", file_name);
             fs::write(file_name, contents).unwrap();
         }
