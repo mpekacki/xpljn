@@ -6,12 +6,12 @@ extern crate sxd_xpath;
 use jsonpath::Selector;
 use regex::Regex;
 use serde_json::Value;
+use std::fs::File;
+use std::io::{self, Write};
 use std::{env, fs, path::PathBuf};
 use sxd_document::parser;
 use sxd_xpath::evaluate_xpath;
 use tempfile::tempdir;
-use std::fs::File;
-use std::io::{self, Write};
 
 pub trait ExpressionReplacer {
     fn replace(contents: &String) -> String;
@@ -21,7 +21,7 @@ pub struct XmlReplacer;
 
 impl ExpressionReplacer for XmlReplacer {
     fn replace(contents: &String) -> String {
-        let re_xml = Regex::new(r#"\{([\w/\\\.:-~]+)#([ =\w/\[\]":]+)\}"#).unwrap();
+        let re_xml = Regex::new(r#"\{([\w/\\\.:-~]+)#([ =\w/\[\]"':@]+)\}"#).unwrap();
         let mut replaced: String = contents.to_string();
         for cap in re_xml.captures_iter(&contents) {
             let res_file = &cap[1];
@@ -98,7 +98,7 @@ pub fn run(config: Config) {
 
 #[cfg(test)]
 mod tests {
-   use super::*;
+    use super::*;
 
     #[test]
     fn test_xml_replacer() {
@@ -112,7 +112,10 @@ mod tests {
         writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
         writeln!(file, r#"  </Strings>"#).unwrap();
         writeln!(file, r#"</Resources>"#).unwrap();
-        let contents = format!("let label = '{{{}#/Resources/Strings/Bye}}'", file_path.into_os_string().into_string().unwrap());
+        let contents = format!(
+            "let label = '{{{}#/Resources/Strings/Bye}}'",
+            file_path.into_os_string().into_string().unwrap()
+        );
         let replaced = XmlReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Byebye!'");
     }
@@ -126,7 +129,10 @@ mod tests {
         writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
         writeln!(file, r#"  "Bye": "Byebye!""#).unwrap();
         writeln!(file, r#"}}"#).unwrap();
-        let contents = format!("let label = '{{{}#$.Bye}}'", file_path.into_os_string().into_string().unwrap());
+        let contents = format!(
+            "let label = '{{{}#$.Bye}}'",
+            file_path.into_os_string().into_string().unwrap()
+        );
         let replaced = JsonReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Byebye!'");
     }
@@ -138,10 +144,83 @@ mod tests {
         let mut file = fs::File::create(&file_path).unwrap();
         writeln!(file, r#"{{"#).unwrap();
         writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
-        writeln!(file, r#"  "Bye": ["Byebye!", "Byebye!"]"#).unwrap();
+        writeln!(file, r#"  "Bye": ["Byebye!", "Ja ne!"]"#).unwrap();
         writeln!(file, r#"}}"#).unwrap();
-        let contents = format!("let label = '{{{}#$.Bye[0]}}'", file_path.into_os_string().into_string().unwrap());
+        let contents = format!(
+            "let label = '{{{}#$.Bye[1]}}'",
+            file_path.into_os_string().into_string().unwrap()
+        );
         let replaced = JsonReplacer::replace(&contents);
-        assert_eq!(replaced, "let label = 'Byebye!'");
+        assert_eq!(replaced, "let label = 'Ja ne!'");
+    }
+
+    #[test]
+    fn test_xml_replacer_with_array() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.xml");
+        let mut file = fs::File::create(&file_path).unwrap();
+        writeln!(file, r#"<?xml version="1.0" encoding="UTF-8" ?>"#).unwrap();
+        writeln!(file, r#"<Resources>"#).unwrap();
+        writeln!(file, r#"  <Strings>"#).unwrap();
+        writeln!(file, r#"    <Hello>Hi!</Hello>"#).unwrap();
+        writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
+        writeln!(file, r#"  </Strings>"#).unwrap();
+        writeln!(file, r#"  <Strings>"#).unwrap();
+        writeln!(file, r#"    <Hello>Ossu!</Hello>"#).unwrap();
+        writeln!(file, r#"    <Bye>Ja ne!</Bye>"#).unwrap();
+        writeln!(file, r#"  </Strings>"#).unwrap();
+        writeln!(file, r#"</Resources>"#).unwrap();
+        let contents = format!(
+            "let label = '{{{}#/Resources/Strings[2]/Bye}}'",
+            file_path.into_os_string().into_string().unwrap()
+        );
+        let replaced = XmlReplacer::replace(&contents);
+        assert_eq!(replaced, "let label = 'Ja ne!'");
+    }
+
+    #[test]
+    fn test_json_replacer_with_deeply_nested_path() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.json");
+        let mut file = fs::File::create(&file_path).unwrap();
+        writeln!(file, r#"{{"#).unwrap();
+        writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
+        writeln!(file, r#"  "Bye": {{"#).unwrap();
+        writeln!(file, r#"    "Hello": "Byebye!", "#).unwrap();
+        writeln!(file, r#"    "Bye": {{"#).unwrap();
+        writeln!(file, r#"      "Hello": "Ja ne!""#).unwrap();
+        writeln!(file, r#"    }}"#).unwrap();
+        writeln!(file, r#"  }}"#).unwrap();
+        writeln!(file, r#"}}"#).unwrap();
+        let contents = format!(
+            "let label = '{{{}#$.Bye.Bye.Hello}}'",
+            file_path.into_os_string().into_string().unwrap()
+        );
+        let replaced = JsonReplacer::replace(&contents);
+        assert_eq!(replaced, "let label = 'Ja ne!'");
+    }
+
+    #[test]
+    fn test_xml_replacer_with_attribute_selector() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.xml");
+        let mut file = fs::File::create(&file_path).unwrap();
+        writeln!(file, r#"<?xml version="1.0" encoding="UTF-8" ?>"#).unwrap();
+        writeln!(file, r#"<Resources>"#).unwrap();
+        writeln!(file, r#"  <Strings lang="en">"#).unwrap();
+        writeln!(file, r#"    <Hello>Hi!</Hello>"#).unwrap();
+        writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
+        writeln!(file, r#"  </Strings>"#).unwrap();
+        writeln!(file, r#"  <Strings lang="jp">"#).unwrap();
+        writeln!(file, r#"    <Hello>Ossu!</Hello>"#).unwrap();
+        writeln!(file, r#"    <Bye>Ja ne!</Bye>"#).unwrap();
+        writeln!(file, r#"  </Strings>"#).unwrap();
+        writeln!(file, r#"</Resources>"#).unwrap();
+        let contents = format!(
+            "let label = '{{{}#/Resources/Strings[@lang='jp']/Bye}}'",
+            file_path.into_os_string().into_string().unwrap()
+        );
+        let replaced = XmlReplacer::replace(&contents);
+        assert_eq!(replaced, "let label = 'Ja ne!'");
     }
 }
