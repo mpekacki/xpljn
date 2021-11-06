@@ -112,9 +112,11 @@ mod tests {
         writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
         writeln!(file, r#"  </Strings>"#).unwrap();
         writeln!(file, r#"</Resources>"#).unwrap();
+        let xpath = "/Resources/Strings/Bye";
         let contents = format!(
-            "let label = '{{{}#/Resources/Strings/Bye}}'",
-            file_path.into_os_string().into_string().unwrap()
+            "let label = '{{{}#{}}}'",
+            file_path.into_os_string().into_string().unwrap(),
+            xpath
         );
         let replaced = XmlReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Byebye!'");
@@ -129,9 +131,11 @@ mod tests {
         writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
         writeln!(file, r#"  "Bye": "Byebye!""#).unwrap();
         writeln!(file, r#"}}"#).unwrap();
+        let jsonpath = "$.Bye";
         let contents = format!(
-            "let label = '{{{}#$.Bye}}'",
-            file_path.into_os_string().into_string().unwrap()
+            "let label = '{{{}#{}}}'",
+            file_path.into_os_string().into_string().unwrap(),
+            jsonpath
         );
         let replaced = JsonReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Byebye!'");
@@ -146,9 +150,11 @@ mod tests {
         writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
         writeln!(file, r#"  "Bye": ["Byebye!", "Ja ne!"]"#).unwrap();
         writeln!(file, r#"}}"#).unwrap();
+        let jsonpath = "$.Bye[1]";
         let contents = format!(
-            "let label = '{{{}#$.Bye[1]}}'",
-            file_path.into_os_string().into_string().unwrap()
+            "let label = '{{{}#{}}}'",
+            file_path.into_os_string().into_string().unwrap(),
+            jsonpath
         );
         let replaced = JsonReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
@@ -170,9 +176,11 @@ mod tests {
         writeln!(file, r#"    <Bye>Ja ne!</Bye>"#).unwrap();
         writeln!(file, r#"  </Strings>"#).unwrap();
         writeln!(file, r#"</Resources>"#).unwrap();
+        let xpath = "/Resources/Strings[2]/Bye";
         let contents = format!(
-            "let label = '{{{}#/Resources/Strings[2]/Bye}}'",
-            file_path.into_os_string().into_string().unwrap()
+            "let label = '{{{}#{}}}'",
+            file_path.into_os_string().into_string().unwrap(),
+            xpath
         );
         let replaced = XmlReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
@@ -192,9 +200,11 @@ mod tests {
         writeln!(file, r#"    }}"#).unwrap();
         writeln!(file, r#"  }}"#).unwrap();
         writeln!(file, r#"}}"#).unwrap();
+        let jsonpath = "$.Bye.Bye.Hello";
         let contents = format!(
-            "let label = '{{{}#$.Bye.Bye.Hello}}'",
-            file_path.into_os_string().into_string().unwrap()
+            "let label = '{{{}#{}}}'",
+            file_path.into_os_string().into_string().unwrap(),
+            jsonpath
         );
         let replaced = JsonReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
@@ -216,9 +226,11 @@ mod tests {
         writeln!(file, r#"    <Bye>Ja ne!</Bye>"#).unwrap();
         writeln!(file, r#"  </Strings>"#).unwrap();
         writeln!(file, r#"</Resources>"#).unwrap();
+        let xpath = "/Resources/Strings[@lang='jp']/Bye";
         let contents = format!(
-            "let label = '{{{}#/Resources/Strings[@lang='jp']/Bye}}'",
-            file_path.into_os_string().into_string().unwrap()
+            "let label = '{{{}#{}}}'",
+            file_path.into_os_string().into_string().unwrap(),
+            xpath
         );
         let replaced = XmlReplacer::replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
