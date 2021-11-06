@@ -14,13 +14,13 @@ use sxd_xpath::evaluate_xpath;
 use tempfile::tempdir;
 
 pub trait ExpressionReplacer {
-    fn replace(contents: &String) -> String;
+    fn replace(&self, contents: &String) -> String;
 }
 
 pub struct XmlReplacer;
 
 impl ExpressionReplacer for XmlReplacer {
-    fn replace(contents: &String) -> String {
+    fn replace(&self, contents: &String) -> String {
         let re_xml = Regex::new(r#"\{([\w/\\\.:-~]+)#([ =\w/\[\]"'.:@]+)\}"#).unwrap();
         let mut replaced: String = contents.to_string();
         for cap in re_xml.captures_iter(&contents) {
@@ -46,7 +46,7 @@ impl ExpressionReplacer for XmlReplacer {
 pub struct JsonReplacer;
 
 impl ExpressionReplacer for JsonReplacer {
-    fn replace(contents: &String) -> String {
+    fn replace(&self, contents: &String) -> String {
         let re_json = Regex::new(r#"\{([\w/\\\.:-~]+)#([$@*.\[\]():?<>!=~\w' ]+)\}"#).unwrap();
         let mut replaced: String = contents.to_string();
         for cap in re_json.captures_iter(&contents) {
@@ -68,14 +68,16 @@ impl ExpressionReplacer for JsonReplacer {
 pub struct Config {
     extension: String,
     dir: PathBuf,
+    replacers: Vec<Box<dyn ExpressionReplacer>>,
 }
 
 impl Config {
     pub fn new(args: &[String]) -> Result<Config, &str> {
         let dir = env::current_dir().expect("Problem with getting current dir");
         let extension = String::from(".template");
+        let replacers: Vec<Box<dyn ExpressionReplacer>> = vec![Box::new(XmlReplacer), Box::new(JsonReplacer)];
 
-        Ok(Config { extension, dir })
+        Ok(Config { extension, dir, replacers })
     }
 }
 
@@ -86,8 +88,9 @@ pub fn run(config: Config) {
         if file_name.ends_with(&config.extension) {
             let mut contents = fs::read_to_string(entry.file_name()).unwrap().clone();
             println!("Contents: {:?}", contents);
-            contents = XmlReplacer::replace(&contents);
-            contents = JsonReplacer::replace(&contents);
+            for replacer in config.replacers.iter() {
+                contents = replacer.replace(&contents);
+            }
             println!("Replaced: {:?}", contents);
             file_name.truncate(file_name.len() - config.extension.len());
             println!("New name: {:?}", file_name);
@@ -119,7 +122,7 @@ mod tests {
             file_path_str,
             xpath
         );
-        let replaced = XmlReplacer::replace(&contents);
+        let replaced = XmlReplacer.replace(&contents);
         assert_eq!(replaced, "let label = 'Byebye!'");
     }
 
@@ -139,7 +142,7 @@ mod tests {
             file_path_str,
             jsonpath
         );
-        let replaced = JsonReplacer::replace(&contents);
+        let replaced = JsonReplacer.replace(&contents);
         assert_eq!(replaced, "let label = 'Byebye!'");
     }
 
@@ -159,7 +162,7 @@ mod tests {
             file_path_str,
             jsonpath
         );
-        let replaced = JsonReplacer::replace(&contents);
+        let replaced = JsonReplacer.replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
     }
 
@@ -186,7 +189,7 @@ mod tests {
             file_path_str,
             xpath
         );
-        let replaced = XmlReplacer::replace(&contents);
+        let replaced = XmlReplacer.replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
     }
 
@@ -211,7 +214,7 @@ mod tests {
             file_path_str,
             jsonpath
         );
-        let replaced = JsonReplacer::replace(&contents);
+        let replaced = JsonReplacer.replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
     }
 
@@ -238,7 +241,7 @@ mod tests {
             file_path_str,
             xpath
         );
-        let replaced = XmlReplacer::replace(&contents);
+        let replaced = XmlReplacer.replace(&contents);
         assert_eq!(replaced, "let label = 'Ja ne!'");
     }
 
@@ -265,7 +268,7 @@ mod tests {
             file_path_str,
             xpath
         );
-        let replaced = XmlReplacer::replace(&contents);
+        let replaced = XmlReplacer.replace(&contents);
         assert_eq!(replaced, "let label = 'Byebye!'", "Should use first match");
     }
 }
