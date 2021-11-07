@@ -1,3 +1,0 @@
-var = "The label is: {C:\Users\glaskowski\IdeaProjects\navio\force-app\common\globalValueSets\ApiLayerCommunicationStatus.globalValueSet-meta.xml#/GlobalValueSet/customValue[fullName="Completed"]/label}";
-something("{stuff/res.xml#/Resources/Strings/Bye}");
-console.log("{stuff/res.json#$.store.book[2].author}");
