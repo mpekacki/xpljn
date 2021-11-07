@@ -6,8 +6,7 @@ extern crate sxd_xpath;
 use jsonpath::Selector;
 use regex::Regex;
 use serde_json::Value;
-use std::fs::File;
-use std::io::{self, Write};
+use std::io::{Read, Write};
 use std::{env, fs, path::PathBuf};
 use sxd_document::parser;
 use sxd_xpath::evaluate_xpath;
@@ -90,14 +89,16 @@ impl Config {
 pub fn run(config: Config) {
     for entry in fs::read_dir(config.dir).unwrap() {
         let entry = entry.unwrap();
-        let mut file_name = entry.file_name().to_string_lossy().to_string();
-        if file_name.ends_with(&config.extension) {
-            let mut contents = fs::read_to_string(entry.file_name()).unwrap().clone();
+        let mut file_path = entry.path().to_str().unwrap().to_string();
+        if file_path.ends_with(&config.extension) {
+            let mut contents = fs::read_to_string(&file_path).unwrap_or_else(|err| {
+                panic!("Error reading file: {:?}, {:?}", err, entry.file_name());
+            });
             for replacer in config.replacers.iter() {
                 contents = replacer.replace(&contents);
             }
-            file_name.truncate(file_name.len() - config.extension.len());
-            fs::write(file_name, contents).unwrap();
+            file_path.truncate(file_path.len() - config.extension.len());
+            fs::write(file_path, contents).unwrap();
         }
     }
 }
@@ -106,144 +107,203 @@ pub fn run(config: Config) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_xml_replacer() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.xml");
-        let mut file = fs::File::create(&file_path).unwrap();
-        writeln!(file, r#"<?xml version="1.0" encoding="UTF-8" ?>"#).unwrap();
-        writeln!(file, r#"<Resources>"#).unwrap();
-        writeln!(file, r#"  <Strings>"#).unwrap();
-        writeln!(file, r#"    <Hello>Hi!</Hello>"#).unwrap();
-        writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
-        writeln!(file, r#"  </Strings>"#).unwrap();
-        writeln!(file, r#"</Resources>"#).unwrap();
-        let file_path_str = file_path.into_os_string().into_string().unwrap();
-        let xpath = "/Resources/Strings/Bye";
-        let contents = format!("let label = '{{{}#{}}}'", file_path_str, xpath);
-        let replaced = XmlReplacer.replace(&contents);
-        assert_eq!(replaced, "let label = 'Byebye!'");
-    }
-
-    #[test]
-    fn test_json_replacer() {
+    fn test_replacer(
+        res_file_lines: Vec<&str>,
+        expression: &str,
+        expected: &str,
+        replacer: &dyn ExpressionReplacer,
+    ) {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.json");
         let mut file = fs::File::create(&file_path).unwrap();
-        writeln!(file, r#"{{"#).unwrap();
-        writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
-        writeln!(file, r#"  "Bye": "Byebye!""#).unwrap();
-        writeln!(file, r#"}}"#).unwrap();
+        for line in res_file_lines {
+            writeln!(file, "{}", line).unwrap();
+        }
         let file_path_str = file_path.into_os_string().into_string().unwrap();
-        let jsonpath = "$.Bye";
-        let contents = format!("let label = '{{{}#{}}}'", file_path_str, jsonpath);
-        let replaced = JsonReplacer.replace(&contents);
-        assert_eq!(replaced, "let label = 'Byebye!'");
+        let contents = format!("let label = '{{{}#{}}}'", file_path_str, expression);
+        let replaced = replacer.replace(&contents);
+        assert_eq!(replaced, "let label = '".to_string() + expected + "'");
+    }
+
+    #[test]
+    fn test_xml_replacer_with_xpath() {
+        test_replacer(
+            vec![
+                r#"<?xml version="1.0" encoding="UTF-8" ?>"#,
+                r#"<Resources>"#,
+                r#"  <Strings>"#,
+                r#"    <Hello>Hi!</Hello>"#,
+                r#"    <Bye>Byebye!</Bye>"#,
+                r#"  </Strings>"#,
+                r#"</Resources>"#,
+            ],
+            "/Resources/Strings/Bye",
+            "Byebye!",
+            &XmlReplacer,
+        );
+    }
+
+    #[test]
+    fn test_json_replacer_with_jsonpath() {
+        test_replacer(
+            vec![
+                r#"{"#,
+                r#"  "Hello": "Hi!", "#,
+                r#"  "Bye": "Byebye!""#,
+                r#"}"#,
+            ],
+            "$.Bye",
+            "Byebye!",
+            &JsonReplacer,
+        );
     }
 
     #[test]
     fn test_json_replacer_with_array() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.json");
-        let mut file = fs::File::create(&file_path).unwrap();
-        writeln!(file, r#"{{"#).unwrap();
-        writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
-        writeln!(file, r#"  "Bye": ["Byebye!", "Ja ne!"]"#).unwrap();
-        writeln!(file, r#"}}"#).unwrap();
-        let file_path_str = file_path.into_os_string().into_string().unwrap();
-        let jsonpath = "$.Bye[1]";
-        let contents = format!("let label = '{{{}#{}}}'", file_path_str, jsonpath);
-        let replaced = JsonReplacer.replace(&contents);
-        assert_eq!(replaced, "let label = 'Ja ne!'");
+        test_replacer(
+            vec![
+                r#"{"#,
+                r#"  "Hello": "Hi!", "#,
+                r#"  "Bye": ["Byebye!", "Ja ne!"]"#,
+                r#"}"#,
+            ],
+            "$.Bye[1]",
+            "Ja ne!",
+            &JsonReplacer,
+        );
     }
 
     #[test]
     fn test_xml_replacer_with_array() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.xml");
-        let mut file = fs::File::create(&file_path).unwrap();
-        writeln!(file, r#"<?xml version="1.0" encoding="UTF-8" ?>"#).unwrap();
-        writeln!(file, r#"<Resources>"#).unwrap();
-        writeln!(file, r#"  <Strings>"#).unwrap();
-        writeln!(file, r#"    <Hello>Hi!</Hello>"#).unwrap();
-        writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
-        writeln!(file, r#"  </Strings>"#).unwrap();
-        writeln!(file, r#"  <Strings>"#).unwrap();
-        writeln!(file, r#"    <Hello>Ossu!</Hello>"#).unwrap();
-        writeln!(file, r#"    <Bye>Ja ne!</Bye>"#).unwrap();
-        writeln!(file, r#"  </Strings>"#).unwrap();
-        writeln!(file, r#"</Resources>"#).unwrap();
-        let file_path_str = file_path.into_os_string().into_string().unwrap();
-        let xpath = "/Resources/Strings[2]/Bye";
-        let contents = format!("let label = '{{{}#{}}}'", file_path_str, xpath);
-        let replaced = XmlReplacer.replace(&contents);
-        assert_eq!(replaced, "let label = 'Ja ne!'");
+        test_replacer(
+            vec![
+                r#"<?xml version="1.0" encoding="UTF-8" ?>"#,
+                r#"<Resources>"#,
+                r#"  <Strings>"#,
+                r#"    <Hello>Hi!</Hello>"#,
+                r#"    <Bye>Byebye!</Bye>"#,
+                r#"  </Strings>"#,
+                r#"  <Strings>"#,
+                r#"    <Hello>Ossu!</Hello>"#,
+                r#"    <Bye>Ja ne!</Bye>"#,
+                r#"  </Strings>"#,
+                r#"</Resources>"#,
+            ],
+            "/Resources/Strings[2]/Bye",
+            "Ja ne!",
+            &XmlReplacer,
+        );
     }
 
     #[test]
     fn test_json_replacer_with_deeply_nested_path() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.json");
-        let mut file = fs::File::create(&file_path).unwrap();
-        writeln!(file, r#"{{"#).unwrap();
-        writeln!(file, r#"  "Hello": "Hi!", "#).unwrap();
-        writeln!(file, r#"  "Bye": {{"#).unwrap();
-        writeln!(file, r#"    "Hello": "Byebye!", "#).unwrap();
-        writeln!(file, r#"    "Bye": {{"#).unwrap();
-        writeln!(file, r#"      "Hello": "Ja ne!""#).unwrap();
-        writeln!(file, r#"    }}"#).unwrap();
-        writeln!(file, r#"  }}"#).unwrap();
-        writeln!(file, r#"}}"#).unwrap();
-        let file_path_str = file_path.into_os_string().into_string().unwrap();
-        let jsonpath = "$.Bye.Bye.Hello";
-        let contents = format!("let label = '{{{}#{}}}'", file_path_str, jsonpath);
-        let replaced = JsonReplacer.replace(&contents);
-        assert_eq!(replaced, "let label = 'Ja ne!'");
+        test_replacer(
+            vec![
+                r#"{"#,
+                r#"  "Hello": "Hi!", "#,
+                r#"  "Bye": {"#,
+                r#"    "Hello": "Byebye!", "#,
+                r#"    "Bye": {"#,
+                r#"      "Hello": "Ja ne!""#,
+                r#"    }"#,
+                r#"  }"#,
+                r#"}"#,
+            ],
+            "$.Bye.Bye.Hello",
+            "Ja ne!",
+            &JsonReplacer,
+        );
     }
 
     #[test]
     fn test_xml_replacer_with_attribute_selector() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.xml");
-        let mut file = fs::File::create(&file_path).unwrap();
-        writeln!(file, r#"<?xml version="1.0" encoding="UTF-8" ?>"#).unwrap();
-        writeln!(file, r#"<Resources>"#).unwrap();
-        writeln!(file, r#"  <Strings lang="en">"#).unwrap();
-        writeln!(file, r#"    <Hello>Hi!</Hello>"#).unwrap();
-        writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
-        writeln!(file, r#"  </Strings>"#).unwrap();
-        writeln!(file, r#"  <Strings lang="jp">"#).unwrap();
-        writeln!(file, r#"    <Hello>Ossu!</Hello>"#).unwrap();
-        writeln!(file, r#"    <Bye>Ja ne!</Bye>"#).unwrap();
-        writeln!(file, r#"  </Strings>"#).unwrap();
-        writeln!(file, r#"</Resources>"#).unwrap();
-        let file_path_str = file_path.into_os_string().into_string().unwrap();
-        let xpath = "/Resources/Strings[@lang='jp']/Bye";
-        let contents = format!("let label = '{{{}#{}}}'", file_path_str, xpath);
-        let replaced = XmlReplacer.replace(&contents);
-        assert_eq!(replaced, "let label = 'Ja ne!'");
+        test_replacer(
+            vec![
+                r#"<?xml version="1.0" encoding="UTF-8" ?>"#,
+                r#"<Resources>"#,
+                r#"  <Strings lang="en">"#,
+                r#"    <Hello>Hi!</Hello>"#,
+                r#"    <Bye>Byebye!</Bye>"#,
+                r#"  </Strings>"#,
+                r#"  <Strings lang="jp">"#,
+                r#"    <Hello>Ossu!</Hello>"#,
+                r#"    <Bye>Ja ne!</Bye>"#,
+                r#"  </Strings>"#,
+                r#"</Resources>"#,
+            ],
+            "/Resources/Strings[@lang='jp']/Bye",
+            "Ja ne!",
+            &XmlReplacer,
+        );
     }
 
     #[test]
     fn test_xml_replacer_with_multiple_matches() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.xml");
-        let mut file = fs::File::create(&file_path).unwrap();
-        writeln!(file, r#"<?xml version="1.0" encoding="UTF-8" ?>"#).unwrap();
-        writeln!(file, r#"<Resources>"#).unwrap();
-        writeln!(file, r#"  <Strings lang="en">"#).unwrap();
-        writeln!(file, r#"    <Hello>Hi!</Hello>"#).unwrap();
-        writeln!(file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
-        writeln!(file, r#"  </Strings>"#).unwrap();
-        writeln!(file, r#"  <Strings lang="jp">"#).unwrap();
-        writeln!(file, r#"    <Hello>Ossu!</Hello>"#).unwrap();
-        writeln!(file, r#"    <Bye>Ja ne!</Bye>"#).unwrap();
-        writeln!(file, r#"  </Strings>"#).unwrap();
-        writeln!(file, r#"</Resources>"#).unwrap();
-        let file_path_str = file_path.into_os_string().into_string().unwrap();
-        let xpath = "/Resources/Strings/Bye";
-        let contents = format!("let label = '{{{}#{}}}'", file_path_str, xpath);
-        let replaced = XmlReplacer.replace(&contents);
-        assert_eq!(replaced, "let label = 'Byebye!'", "Should use first match");
+        test_replacer(
+            vec![
+                r#"<?xml version="1.0" encoding="UTF-8" ?>"#,
+                r#"<Resources>"#,
+                r#"  <Strings lang="en">"#,
+                r#"    <Hello>Hi!</Hello>"#,
+                r#"    <Bye>Byebye!</Bye>"#,
+                r#"  </Strings>"#,
+                r#"  <Strings lang="jp">"#,
+                r#"    <Hello>Ossu!</Hello>"#,
+                r#"    <Bye>Ja ne!</Bye>"#,
+                r#"  </Strings>"#,
+                r#"</Resources>"#,
+            ],
+            "/Resources/Strings/Bye",
+            "Byebye!",
+            &XmlReplacer,
+        );
+    }
+
+    #[test]
+    fn test_run() {
+        let temp_dir = tempdir().unwrap();
+        let resource_file_path = temp_dir.path().join("test.xml");
+        let mut resource_file = fs::File::create(&resource_file_path).unwrap();
+        let template_extension = ".template";
+        let template_file_path = temp_dir
+            .path()
+            .join(vec!["test", template_extension].join(""));
+        let mut template_file = fs::File::create(&template_file_path).unwrap();
+        writeln!(resource_file, r#"<?xml version="1.0" encoding="UTF-8" ?>"#).unwrap();
+        writeln!(resource_file, r#"<Resources>"#).unwrap();
+        writeln!(resource_file, r#"  <Strings lang="en">"#).unwrap();
+        writeln!(resource_file, r#"    <Hello>Hi!</Hello>"#).unwrap();
+        writeln!(resource_file, r#"    <Bye>Byebye!</Bye>"#).unwrap();
+        writeln!(resource_file, r#"  </Strings>"#).unwrap();
+        writeln!(resource_file, r#"</Resources>"#).unwrap();
+        let template_file_contents = format!(
+            "{{{}#/Resources/Strings/Bye}}",
+            resource_file_path.into_os_string().into_string().unwrap()
+        );
+        writeln!(template_file, "{}", template_file_contents).unwrap();
+        drop(template_file);
+        drop(resource_file);
+        let replacers: Vec<Box<dyn ExpressionReplacer>> =
+            vec![Box::new(XmlReplacer), Box::new(JsonReplacer)];
+        let extension = template_extension.to_string();
+        let config = Config {
+            extension,
+            dir: temp_dir.path().to_path_buf(),
+            replacers,
+        };
+        run(config);
+        let template_file_path_without_extension = template_file_path
+            .to_str()
+            .unwrap()
+            .replace(template_extension, "");
+        let mut template_file = fs::File::open(template_file_path_without_extension).unwrap();
+        let mut template_contents = String::new();
+        template_file
+            .read_to_string(&mut template_contents)
+            .unwrap();
+        assert_eq!(
+            template_contents, "Byebye!\n",
+            "Should replace the first match"
+        );
     }
 }
